@@ -21,9 +21,14 @@ const publicDir = [
   path.join(appDir, 'public'),
   path.join(appDir, 'knowora', 'public')
 ].find(dir => existsSync(path.join(dir, 'index.html')));
-const indexFile = publicDir ? path.join(publicDir, 'index.html') : null;
+const frontendDir = publicDir || (existsSync(path.join(appDir, 'index.html')) ? appDir : null);
+const indexFile = frontendDir ? path.join(frontendDir, 'index.html') : null;
 app.use(express.json({ limit: '6mb' }));
 if (publicDir) app.use(express.static(publicDir));
+if (!publicDir && frontendDir) {
+  app.get('/app.js', (_, res) => res.sendFile(path.join(frontendDir, 'app.js')));
+  app.get('/style.css', (_, res) => res.sendFile(path.join(frontendDir, 'style.css')));
+}
 app.get('/', (_, res) => {
   if (indexFile) return res.sendFile(indexFile);
   res.status(503).type('text').send(
