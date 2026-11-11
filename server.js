@@ -16,16 +16,22 @@ const hasSupabase = Boolean(
 );
 const db = hasSupabase ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY) : null;
 const app = express();
-const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
-const indexFile = path.join(publicDir, 'index.html');
-if (!existsSync(indexFile)) {
-  throw new Error(`Website entry page not found at ${indexFile}. Make sure the public folder is included in the deployed service.`);
-}
+const appDir = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = [
+  path.join(appDir, 'public'),
+  path.join(appDir, 'knowora', 'public')
+].find(dir => existsSync(path.join(dir, 'index.html')));
+const indexFile = publicDir ? path.join(publicDir, 'index.html') : null;
 app.use(express.json({ limit: '6mb' }));
-app.use(express.static(publicDir));
-app.get('/', (_, res) => res.sendFile(indexFile));
+if (publicDir) app.use(express.static(publicDir));
+app.get('/', (_, res) => {
+  if (indexFile) return res.sendFile(indexFile);
+  res.status(503).type('text').send(
+    'Knowora frontend files are missing from this deployment. Include public/index.html, public/app.js, and public/style.css in the deployed service.'
+  );
+});
 
-app.get('/health', (_, res) => res.json({ ok: true, configured: hasSupabase }));
+app.get('/health', (_, res) => res.json({ ok: true, configured: hasSupabase, frontend: Boolean(indexFile) }));
 app.get('/api/config', (_, res) => res.json({
   url: hasSupabase ? SUPABASE_URL : null,
   anon: hasSupabase ? SUPABASE_ANON_KEY : null,
