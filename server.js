@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 
-const { GEMINI_API_KEY, GEMINI_MODEL = 'gemini-2.5-flash-lite', SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY, PORT = 3000 } = process.env;
+const { GEMINI_API_KEY, GEMINI_MODEL = 'gemini-3.5-flash-lite', SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY, PORT = 3000 } = process.env;
 const hasSupabase = Boolean(
   SUPABASE_URL &&
   SUPABASE_ANON_KEY &&
