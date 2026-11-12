@@ -43,17 +43,25 @@ app.get('/api/config', (_, res) => res.json({
   configured: hasSupabase
 }));
 
-const PROMPT = (lang, text) => `You are Knowora, an expert identifier. ${text ? `The user searched: "${text}".` : 'Identify the main thing in the photo.'}
-Reply ONLY with JSON in ${lang} (keep keys in English):
-{"name":"","scientificName":"","category":"animal|bird|plant|object|technology|other","living":true,"confidence":0-100,
-"summary":"2-3 sentences","details":[{"title":"","text":""}],
-"howItWorksOrUse":"","funFacts":["","",""],
-"priceRange":"approx price with currency, or null","whereToFind":"where it lives (living) or where to buy/find it",
-"canBePurchased":true,"purchaseNote":"for living things: legality/ethics of keeping or buying, else null",
-"conservation":{"status":"IUCN status or null","note":""},
+const PROMPT = (lang, text) => `You are Knowora, a careful visual and text identification assistant. ${text ? `The user searched for: "${text}".` : 'Identify the main visible subject in the photo.'}
+Reply with valid JSON only, in ${lang}; keep JSON keys in English. Use this exact shape:
+{"name":"","scientificName":null,"category":"animal|bird|plant|object|technology|other","living":null,"confidence":0,
+"summary":"A clear, useful 2-3 sentence overview.",
+"characteristics":["Visible or defining trait","",""],
+"habitat":null,
+"food":null,
+"behaviourOrUse":"",
+"details":[{"title":"","text":""}],
+"funFacts":["","",""],
+"priceRange":null,
+"priceNote":"",
+"whereToFind":"",
+"canBePurchased":null,
+"purchaseNote":"",
+"conservation":{"status":null,"note":""},
 "similar":["","",""],
 "quiz":{"question":"","options":["","","",""],"answerIndex":0,"explanation":""}}
-For animals/birds/plants include physical traits, habitat, food, behaviour, wild vs domestic in details. For objects include types and how to use. Never invent shopping URLs.`;
+For animals, birds, and plants: include identifying physical characteristics, natural habitat/range, typical food or diet, behavior, and conservation only when known. For objects and technology: describe visible characteristics, common types, how it works or is used, and a realistic approximate price range in Indian rupees only if reasonably known. Mark unknown values null or explain uncertainty; never invent exact current prices, product availability, conservation status, or facts. Give 2-3 genuinely interesting facts. The app creates marketplace search links separately; never provide or invent URLs.`;
 
 async function wikiFallback(q) {
   try {
@@ -74,7 +82,9 @@ app.post('/api/identify', async (req, res) => {
     const queryText = typeof text === 'string' ? text.trim() : '';
     if (!image && !queryText) return res.status(400).json({ error: 'Add a photo or type something to identify.' });
     if (!GEMINI_API_KEY) return res.status(503).json({ error: 'Add your Gemini API key to .env before identifying items.' });
-    const key = crypto.createHash('sha256').update(`${image || queryText.toLowerCase()}${lang}`).digest('hex');
+    const key = crypto.createHash('sha256')
+      .update(JSON.stringify({ input: image || queryText.toLowerCase(), lang, promptVersion: 2 }))
+      .digest('hex');
 
     let result, cached = await db.from('cache').select('result').eq('hash', key).maybeSingle();
     result = cached.data?.result;
@@ -89,14 +99,35 @@ app.post('/api/identify', async (req, res) => {
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
           body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseMimeType: 'application/json', temperature: 0.3 } })
         });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error?.message || `Gemini returned HTTP ${r.status}`);
-        result = JSON.parse(j.candidates[0].content.parts[0].text);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const error = new Error(j.error?.message || `Gemini returned HTTP ${r.status}`);
+          error.status = r.status;
+          throw error;
+        }
+        const answer = j.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
+        if (!answer) {
+          const reason = j.candidates?.[0]?.finishReason;
+          throw new Error(reason ? `Gemini returned no answer (${reason}).` : 'Gemini returned an empty answer.');
+        }
+        result = JSON.parse(answer);
+        if (!result.name) throw new Error('Gemini response did not include an identified name.');
         await db.from('cache').upsert({ hash: key, result });
       } catch (e) {
-        console.error('AI failed:', e.message);
+        console.error('AI identification failed:', e.message);
         result = queryText ? await wikiFallback(queryText) : null;
-        if (!result) return res.json({ soft: true, message: 'Knowora could not read this one clearly. Try a closer, well-lit photo, or type its name in search.' });
+        if (!result) {
+          let message = 'The identification service could not process this request. Please try again.';
+          const reason = e.message.toLowerCase();
+          if (e.status === 401 || e.status === 403 || /api[_ ]key|permission denied/.test(reason)) message = 'Gemini rejected the API key. Check GEMINI_API_KEY in Render settings and confirm the key has API access.';
+          else if (e.status === 404 || /model .*not found|unsupported model/.test(reason)) message = 'The Gemini model setting is invalid or unavailable. Check GEMINI_MODEL in Render settings.';
+          else if (e.status === 429) message = 'The Gemini API quota or rate limit has been reached. Check the API usage and billing limits, then try again.';
+          else if (e.status === 400) message = 'Gemini rejected the request. Check the model and API key settings in Render, then try again.';
+          else if (e.name === 'TimeoutError' || e.name === 'AbortError') message = 'Image identification timed out. Try a smaller photo or try again in a moment.';
+          else if (e instanceof SyntaxError) message = 'The AI returned an unreadable answer. Please try again.';
+          else if (/no answer|empty answer/i.test(e.message)) message = 'The AI could not identify the main subject in that photo. Try a clearer photo with one main subject.';
+          return res.status(e.status && e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: message });
+        }
       }
     }
     await db.from('identifications').insert({ user_id: u.user.id, query: queryText || 'photo', name: result.name, category: result.category, result });

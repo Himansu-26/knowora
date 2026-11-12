@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Knowora – Identify anything</title><link rel="stylesheet" href="style.css">
+<title>Knowora – Identify anything</title><link rel="stylesheet" href="style.css?v=5">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.js"></script>
 </head><body>
 <header><h1>Know<span>ora</span></h1>
@@ -15,7 +15,9 @@
 
 <section id="home" class="tab" hidden>
 <div class="hero"><h2>See something? Know everything.</h2><p>Snap, upload or search any living or non-living thing.</p>
-<div class="search"><input id="q" placeholder="Search: squirrel, vacuum cleaner…"><button id="go">Search</button></div>
+<form id="search-form" class="search" role="search">
+<input id="q" type="text" name="query" placeholder="Search: squirrel, vacuum cleaner…" aria-label="Search for something to identify" autocomplete="off" autocapitalize="off" spellcheck="false">
+<button id="go" type="submit">Search</button></form>
 <div class="row"><label class="btn">📷 Take photo<input id="cam" type="file" accept="image/*" capture="environment" hidden></label>
 <label class="btn alt">🖼 Upload image<input id="up-file" type="file" accept="image/*" hidden></label></div></div>
 <img id="prev" hidden alt="preview"><p id="status" class="msg"></p><div id="result"></div></section>
@@ -24,4 +26,4 @@
 <section id="quiz" class="tab" hidden><div id="qbox" class="card"><p>Identify something first, then come back for a quiz about it.</p></div></section>
 </main>
 <footer>Knowora · AI can make mistakes. Verify important details.</footer>
-<script src="app.js"></script></body></html>
+<script src="app.js?v=5"></script></body></html>

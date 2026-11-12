@@ -61,14 +61,17 @@ function compress(file) {
 }
 async function ready() {                                   // handles Render cold start quietly
   for (let i = 0; i < 12; i++) { try { if ((await fetch('/health')).ok) return; } catch {} $('status').textContent = 'Getting Knowora ready…'; await new Promise(r => setTimeout(r, 4000)); }
+  throw new Error('Knowora is taking too long to respond. Please try again in a minute.');
 }
 let busy = false;
 async function identify(body) {
+  if (!session) { $('status').textContent = 'Please sign in before identifying something.'; return; }
   if (busy) return; busy = true; $('result').innerHTML = ''; $('status').textContent = 'Knowora is looking… 🔍';
   try {
     await ready();
     const r = await fetch('/api/identify', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token }, body: JSON.stringify({ ...body, lang: $('lang').value }) });
-    const j = await r.json();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `The server returned an error (${r.status}).`);
     $('status').textContent = j.soft || j.error ? (j.message || j.error) : '';
     if (j.result) render(j.result);
   } catch (error) { $('status').textContent = error.message || 'Connection hiccup. Please tap once more.'; }
@@ -79,25 +82,44 @@ async function identify(body) {
   catch (error) { $('status').textContent = error.message; }
   finally { e.target.value = ''; }
 });
-$('go').onclick = () => { const t = $('q').value.trim(); if (t) { $('prev').hidden = true; identify({ text: t }); } };
-$('q').onkeydown = e => e.key === 'Enter' && $('go').click();
+$('search-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const t = $('q').value.trim();
+  if (!t) { $('q').focus(); return; }
+  $('prev').hidden = true;
+  identify({ text: t });
+});
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function render(r) {
-  lastQuiz = r.quiz; const n = encodeURIComponent(r.name);
-  const sec = (t, v) => v ? `<h3>${t}</h3><p>${esc(v)}</p>` : '';
+  lastQuiz = r.quiz;
+  const itemName = r.name || '';
+  const amazonUrl = `https://www.amazon.in/s?${new URLSearchParams({ k: itemName })}`;
+  const flipkartUrl = `https://www.flipkart.com/search?${new URLSearchParams({ q: itemName })}`;
+  const sec = (t, v) => v ? `<h3>${esc(t)}</h3><p>${esc(v)}</p>` : '';
+  const list = (title, items) => Array.isArray(items) && items.length ? `<h3>${title}</h3><ul>${items.map(item => `<li>${esc(item)}</li>`).join('')}</ul>` : '';
+  const living = r.living === true;
+  const shoppingLinks = !living && r.category !== 'other'
+    ? `<h3>Shop online</h3><p>Open search results for ${esc(itemName)}. Prices and availability may vary.</p><div class="row shopping-links"><a class="btn" href="${amazonUrl}" target="_blank" rel="noopener noreferrer" aria-label="Search for ${esc(itemName)} on Amazon India">Open Amazon India</a><a class="btn alt" href="${flipkartUrl}" target="_blank" rel="noopener noreferrer" aria-label="Search for ${esc(itemName)} on Flipkart">Open Flipkart</a></div>`
+    : '';
   $('result').innerHTML = `<div class="card"><h2>${esc(r.name)}</h2><span class="tag">${esc(r.category)}</span>
   ${r.living === true ? '<span class="tag">Living</span>' : r.living === false ? '<span class="tag">Non-living</span>' : ''}
   ${r.scientificName ? `<span class="tag"><i>${esc(r.scientificName)}</i></span>` : ''}
   ${r.confidence ? `<span class="tag">${esc(r.confidence)}% sure</span>` : ''}
   <p>${esc(r.summary)}</p><button id="say">🔊 Listen</button>
+  ${list('Characteristics', r.characteristics)}
+  ${living ? sec('Habitat', r.habitat) : ''}
+  ${living ? sec('Food / diet', r.food) : ''}
+  ${sec(living ? 'Behaviour' : 'How it works / how to use', r.behaviourOrUse || r.howItWorksOrUse)}
   ${(r.details || []).map(d => sec(d.title, d.text)).join('')}
-  ${sec('How it works / how to use', r.howItWorksOrUse)}
-  ${r.funFacts?.length ? `<h3>Fun facts</h3><ul>${r.funFacts.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
-  ${sec('Approximate price', r.priceRange)}${sec('Where to find it', r.whereToFind)}${sec('Can it be bought?', r.purchaseNote)}
+  ${!living ? sec('Approximate price', r.priceRange) : ''}
+  ${r.priceNote ? `<p class="msg">${esc(r.priceNote)}</p>` : ''}
+  ${sec(living ? 'Where it lives' : 'Where to find it', r.whereToFind)}
+  ${sec('Purchase note', r.purchaseNote)}
+  ${list('Interesting facts', r.funFacts)}
   ${r.conservation?.status ? `<h3>Conservation</h3><p><b>${esc(r.conservation.status)}</b> — ${esc(r.conservation.note)}</p>` : ''}
   ${r.similar?.length ? `<h3>Similar</h3>${r.similar.map(s => `<span class="tag">${esc(s)}</span>`).join('')}` : ''}
-  ${r.priceRange && r.living !== true ? `<div class="row"><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=shop&q=${n}">🛒 Google Shopping</a><a class="btn alt" target="_blank" rel="noopener" href="https://www.amazon.com/s?k=${n}">Amazon</a></div>` : ''}</div>`;
+  ${shoppingLinks}</div>`;
   $('say').onclick = () => { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(r.name + '. ' + r.summary)); };
 }
 async function loadHistory() {
